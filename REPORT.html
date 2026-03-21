@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CBD Assignment 2 – AI-Assisted Test Development Report</title>
+<style>
+  body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; margin: 2.5cm; color: #000; }
+  h1 { font-size: 18pt; color: #1F3864; border-bottom: 2px solid #1F3864; padding-bottom: 6px; }
+  h2 { font-size: 14pt; color: #1F3864; margin-top: 24px; }
+  h3 { font-size: 12pt; color: #2F5496; margin-top: 18px; }
+  h4 { font-size: 11pt; color: #2F5496; margin-top: 14px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 10pt; }
+  th { background-color: #1F3864; color: white; padding: 6px 8px; text-align: left; }
+  td { border: 1px solid #BDD6EE; padding: 5px 8px; vertical-align: top; }
+  tr:nth-child(even) td { background-color: #EBF3FB; }
+  pre { background-color: #F2F2F2; border-left: 4px solid #2F5496; padding: 10px 14px;
+        font-family: Consolas, "Courier New", monospace; font-size: 9.5pt;
+        white-space: pre-wrap; word-wrap: break-word; overflow-x: auto; }
+  code { font-family: Consolas, "Courier New", monospace; background: #F2F2F2;
+         padding: 1px 4px; font-size: 9.5pt; }
+  blockquote { border-left: 4px solid #BDD6EE; margin: 8px 0; padding: 6px 14px;
+               background: #EBF3FB; font-style: italic; }
+  .section-box { border: 1px solid #BDD6EE; padding: 10px 16px; margin: 16px 0;
+                 background: #F9FBFE; border-radius: 4px; }
+  .pyramid { text-align: center; font-family: Consolas, monospace; font-size: 10.5pt;
+             background: #F2F2F2; padding: 16px; margin: 12px 0; border: 1px solid #ccc; }
+  .label { font-weight: bold; }
+  hr { border: none; border-top: 1px solid #BDD6EE; margin: 20px 0; }
+  ul li { margin-bottom: 4px; }
+  ol li { margin-bottom: 4px; }
+  .subtitle { color: #555; font-size: 10pt; margin-top: -6px; margin-bottom: 16px; }
+  .cover { text-align: center; margin-bottom: 40px; padding: 30px; background: #EBF3FB; border-radius: 6px; }
+  .cover h1 { font-size: 22pt; border: none; }
+  .cover p { font-size: 11pt; margin: 4px 0; }
+  @media print { pre { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>CBD Assignment 2</h1>
+  <h2 style="border:none; margin-top:0; color:#2F5496;">AI-Assisted Test Development Report</h2>
+  <p><strong>Application:</strong> Task Manager REST API (Spring Boot 3.2)</p>
+  <p><strong>Submission Type:</strong> Individual &nbsp;|&nbsp; <strong>Weighting:</strong> 20%</p>
+</div>
+
+<h2>Application Under Test</h2>
+
+<p>The application is a <strong>Task Manager REST API</strong> built with Spring Boot 3.2.3. It exposes endpoints
+for managing <em>Projects</em> and <em>Tasks</em> and enforces the following business rules:</p>
+<ul>
+  <li>A task cannot have a due date in the past.</li>
+  <li>A completed task (<code>DONE</code>) cannot be reopened to <code>OPEN</code>.</li>
+  <li>A project cannot be deleted while it has <code>IN_PROGRESS</code> tasks.</li>
+  <li>Project names must be unique.</li>
+</ul>
+
+<p><strong>Technology stack:</strong> Spring Boot 3.2.3, Spring Data JPA, H2 (file at runtime / in-memory for tests),
+Jakarta Bean Validation, JUnit 5, Mockito, AssertJ.</p>
+
+<hr>
+
+<!-- ============================================================ -->
+<h2>Section 1 – Test Strategy</h2>
+
+<h3>Alignment with the Test Pyramid</h3>
+
+<p>The test suite is intentionally structured in three tiers that mirror the Test Pyramid: the cheapest, fastest tests dominate at the base; the fewest, most comprehensive tests sit at the apex.</p>
+
+<div class="pyramid">
+<pre>         /\
+        /  \      E2E (4 tests)  – Full HTTP stack, real H2 DB
+       /----\
+      / Int  \    Integration (9 tests)  – JPA slice + Web slice
+     /--------\
+    /  Unit    \  Unit (15 tests)  – No Spring, Mockito only
+   /____________\</pre>
+</div>
+
+<h4>Unit Tests (15 tests, ~0.7 s total)</h4>
+<p>Unit tests dominate the suite (54%). They test business logic in isolation using
+<code>@ExtendWith(MockitoExtension.class)</code> – no Spring context is ever loaded. All dependencies are replaced
+with <code>@Mock</code> stubs; the class under test is wired via <code>@InjectMocks</code>.</p>
+
+<h4>Integration Tests (9 tests, ~3 s total)</h4>
+<p>Integration tests operate at two Spring slices:</p>
+<ul>
+  <li><strong>@DataJpaTest</strong> (4 tests) – loads only JPA, repositories, and H2. Tests derived query methods against a real schema.</li>
+  <li><strong>@WebMvcTest</strong> (5 tests) – loads only the web layer. The service is replaced with <code>@MockBean</code>. Tests HTTP binding, JSON serialisation, and bean validation errors handled by <code>GlobalExceptionHandler</code>.</li>
+</ul>
+
+<h4>End-to-End Tests (4 tests, ~11 s total)</h4>
+<p>E2E tests use <code>@SpringBootTest(webEnvironment = RANDOM_PORT)</code> + <code>TestRestTemplate</code>.
+The full application boots against an H2 in-memory database. These tests exercise the complete
+request → service → repository → response pipeline.</p>
+
+<h3>Test Pyramid Distribution</h3>
+<table>
+  <tr><th>Level</th><th>Tests</th><th>% of Suite</th><th>Typical Duration</th></tr>
+  <tr><td>Unit</td><td>15</td><td>54%</td><td>&lt; 1 ms each</td></tr>
+  <tr><td>Integration</td><td>9</td><td>32%</td><td>50–500 ms each</td></tr>
+  <tr><td>End-to-End</td><td>4</td><td>14%</td><td>1–3 s each</td></tr>
+  <tr><td><strong>Total</strong></td><td><strong>28</strong></td><td><strong>100%</strong></td><td></td></tr>
+</table>
+
+<hr>
+
+<!-- ============================================================ -->
+<h2>Section 2 – Dependency Injection and Mocking Approach</h2>
+
+<h3>How Constructor Injection Enables Testability</h3>
+
+<p>All service classes use <strong>constructor injection</strong> exclusively:</p>
+<pre>@Service
+public class TaskService {
+    private final TaskRepository taskRepository;
+    private final ProjectRepository projectRepository;
+    private final TaskMapper taskMapper;
+
+    public TaskService(TaskRepository taskRepository,
+                       ProjectRepository projectRepository,
+                       TaskMapper taskMapper) {
+        this.taskRepository = taskRepository;
+        this.projectRepository = projectRepository;
+        this.taskMapper = taskMapper;
+    }
+}</pre>
+
+<p>Because dependencies are declared in the constructor, a unit test can instantiate <code>TaskService</code>
+directly by passing mock objects. Mockito's <code>@InjectMocks</code> exploits this same constructor to inject
+<code>@Mock</code> instances. No Spring container is needed.</p>
+
+<p><strong>Why not field injection?</strong> Field injection (<code>@Autowired TaskRepository repo;</code>) would
+make this impossible – a test would need to start the full Spring context or use brittle reflection hacks to
+inject mocks.</p>
+
+<h3>Where Mocks Were Used and Why</h3>
+<table>
+  <tr><th>Test Class</th><th>What is Mocked</th><th>Why</th></tr>
+  <tr>
+    <td><code>TaskServiceTest</code></td>
+    <td><code>TaskRepository</code>, <code>ProjectRepository</code>, <code>TaskMapper</code></td>
+    <td>Isolate <code>TaskService</code> business logic from persistence. Control exact return values
+    (e.g. <code>Optional.empty()</code> to trigger 404 logic).</td>
+  </tr>
+  <tr>
+    <td><code>ProjectServiceTest</code></td>
+    <td><code>ProjectRepository</code>, <code>TaskRepository</code>, <code>ProjectMapper</code></td>
+    <td>Test delete-blocking logic without a real database.</td>
+  </tr>
+  <tr>
+    <td><code>TaskControllerWebMvcTest</code></td>
+    <td><code>TaskService</code> (<code>@MockBean</code>)</td>
+    <td>Isolate the HTTP layer. Test controller annotations, request validation, and
+    <code>GlobalExceptionHandler</code> responses independently of service logic.</td>
+  </tr>
+</table>
+
+<p><code>ArgumentCaptor</code> was used in <code>TaskServiceTest</code> to inspect the <code>Task</code> entity passed
+to <code>taskRepository.save()</code>, confirming <code>completedAt</code> was set before the save call –
+a side-effect that cannot be observed from the return value alone.</p>
+
+<h3>Where Mocks Were Avoided and Why</h3>
+<table>
+  <tr><th>Test Class</th><th>Mock Avoided</th><th>Why</th></tr>
+  <tr>
+    <td><code>TaskMapperTest</code></td>
+    <td>None – no dependencies</td>
+    <td><code>TaskMapper</code> is a pure function with no collaborators. Direct instantiation. Zero framework overhead.</td>
+  </tr>
+  <tr>
+    <td><code>TaskRepositoryIntegrationTest</code></td>
+    <td>No mocks</td>
+    <td>The purpose is to verify that derived query methods produce correct SQL. Mocking the repository would defeat this entirely.</td>
+  </tr>
+  <tr>
+    <td><code>TaskManagerE2ETest</code></td>
+    <td>No mocks</td>
+    <td>The purpose is to verify that all layers work together correctly. Mocking any layer would undermine this guarantee.</td>
+  </tr>
+</table>
+
+<hr>
+
+<!-- ============================================================ -->
+<h2>Section 3 – Mapping to Test Pyramid</h2>
+
+<h3>Unit Tests (Bottom Layer) – 15 tests</h3>
+
+<h4>TaskServiceTest (8 tests) – <code>@ExtendWith(MockitoExtension.class)</code></h4>
+<table>
+  <tr><th>Test Method</th><th>What It Verifies</th></tr>
+  <tr><td><code>createTask_whenProjectExistsAndDueDateFuture_returnsTaskDTO</code></td><td>Happy path: task created with status OPEN when project exists and due date is in the future</td></tr>
+  <tr><td><code>createTask_whenProjectNotFound_throwsResourceNotFoundException</code></td><td>Boundary: missing project triggers 404 exception before any save</td></tr>
+  <tr><td><code>createTask_whenDueDateIsInPast_throwsBusinessRuleException</code></td><td>Business rule: past due dates are rejected</td></tr>
+  <tr><td><code>updateTaskStatus_toDone_setsCompletedAtTimestamp</code></td><td>Side-effect: <code>completedAt</code> is populated when transitioning to DONE</td></tr>
+  <tr><td><code>updateTaskStatus_fromDoneToOpen_throwsBusinessRuleException</code></td><td>Business rule: completed tasks cannot be reopened</td></tr>
+  <tr><td><code>getTaskById_whenFound_returnsDTO</code></td><td>Happy path: found task is mapped to DTO</td></tr>
+  <tr><td><code>getTaskById_whenNotFound_throwsResourceNotFoundException</code></td><td>Boundary: missing task throws 404 exception</td></tr>
+  <tr><td><code>deleteTask_whenTaskExists_callsRepositoryDelete</code></td><td>Delegation: delete is forwarded to repository</td></tr>
+</table>
+
+<h4>ProjectServiceTest (5 tests) – <code>@ExtendWith(MockitoExtension.class)</code></h4>
+<table>
+  <tr><th>Test Method</th><th>What It Verifies</th></tr>
+  <tr><td><code>createProject_whenNameIsUnique_returnsProjectDTO</code></td><td>Happy path: unique name allows creation</td></tr>
+  <tr><td><code>createProject_whenNameIsDuplicate_throwsBusinessRuleException</code></td><td>Business rule: duplicate names are rejected</td></tr>
+  <tr><td><code>deleteProject_whenHasInProgressTasks_throwsBusinessRuleException</code></td><td>Business rule: project with in-progress work cannot be deleted</td></tr>
+  <tr><td><code>deleteProject_whenNoInProgressTasks_callsRepositoryDelete</code></td><td>Happy path: safe projects are deleted</td></tr>
+  <tr><td><code>getProjectById_whenNotFound_throwsResourceNotFoundException</code></td><td>Boundary: missing project throws 404</td></tr>
+</table>
+
+<h4>TaskMapperTest (2 tests) – no annotations, plain Java instantiation</h4>
+<table>
+  <tr><th>Test Method</th><th>What It Verifies</th></tr>
+  <tr><td><code>toDTO_mapsAllFieldsCorrectly</code></td><td>All entity fields appear correctly in the DTO</td></tr>
+  <tr><td><code>toDTO_whenCompletedAtIsNull_dtoCompletedAtIsNull</code></td><td>Nullable fields pass through as null without NPE</td></tr>
+</table>
+
+<h3>Integration Tests (Middle Layer) – 9 tests</h3>
+
+<h4>TaskRepositoryIntegrationTest (4 tests) – <code>@DataJpaTest</code></h4>
+<p>Loads only the JPA slice: repositories, entity manager, and H2. No web layer, no service layer.</p>
+<table>
+  <tr><th>Test Method</th><th>What It Verifies</th></tr>
+  <tr><td><code>findByProjectId_returnsOnlyTasksBelongingToThatProject</code></td><td>Derived query produces correct SQL JOIN</td></tr>
+  <tr><td><code>findByStatus_returnsOnlyTasksWithMatchingStatus</code></td><td>Enum column filtering works correctly</td></tr>
+  <tr><td><code>countByProjectIdAndStatus_returnsCorrectCount</code></td><td>COUNT query with two predicates returns accurate number</td></tr>
+  <tr><td><code>findByPriorityAndStatusNot_returnsCriticalNonDoneTasks</code></td><td>NOT-EQUAL filter in derived query works correctly</td></tr>
+</table>
+
+<h4>TaskControllerWebMvcTest (5 tests) – <code>@WebMvcTest(TaskController.class)</code></h4>
+<p>Loads only the web layer. <code>TaskService</code> is replaced with <code>@MockBean</code>.</p>
+<table>
+  <tr><th>Test Method</th><th>What It Verifies</th></tr>
+  <tr><td><code>createTask_withValidRequest_returns201WithTaskDTO</code></td><td>Controller maps POST to service and returns 201 with JSON body</td></tr>
+  <tr><td><code>createTask_withBlankTitle_returns400</code></td><td><code>@NotBlank</code> validation enforced before reaching the service</td></tr>
+  <tr><td><code>createTask_withNullProjectId_returns400</code></td><td><code>@NotNull</code> validation enforced</td></tr>
+  <tr><td><code>getTaskById_whenTaskNotFound_returns404</code></td><td><code>ResourceNotFoundException</code> mapped to 404 by <code>GlobalExceptionHandler</code></td></tr>
+  <tr><td><code>updateTaskStatus_withValidStatus_returns200</code></td><td>PATCH endpoint mapped correctly</td></tr>
+</table>
+
+<h3>End-to-End Tests (Top Layer) – 4 tests</h3>
+
+<h4>TaskManagerE2ETest (4 tests) – <code>@SpringBootTest(webEnvironment = RANDOM_PORT)</code></h4>
+<p>Full application on a random port. <code>TestRestTemplate</code> makes real HTTP calls. H2 in-memory DB.</p>
+<table>
+  <tr><th>Test Method</th><th>What It Verifies</th></tr>
+  <tr><td><code>fullWorkflow_createProjectAndTask_thenCompleteTask</code></td><td>Full lifecycle: create project → create task → complete → verify DONE + completedAt via real HTTP</td></tr>
+  <tr><td><code>createTask_forNonExistentProject_returns404</code></td><td>Error path through the full stack: correct 404 response body</td></tr>
+  <tr><td><code>deleteProject_withInProgressTask_returns409Conflict</code></td><td>Business rule enforced through full HTTP stack, 409 response</td></tr>
+  <tr><td><code>getCriticalOpenTasks_returnsOnlyCriticalNonDoneTasks</code></td><td>Filter endpoint returns correct subset from real DB</td></tr>
+</table>
+
+<hr>
+
+<!-- ============================================================ -->
+<h2>Section 4 – AI Interaction Log</h2>
+
+<!-- ---- Example 1 ---- -->
+<h3>Example 1: AI Output Accepted As-Is</h3>
+
+<p><strong>Prompt given to AI:</strong></p>
+<blockquote>
+"Write a <code>@DataJpaTest</code> integration test for <code>TaskRepository</code>. Test the
+<code>findByPriorityAndStatusNot</code> query method. Persist test data using <code>TestEntityManager</code>,
+clear the entity manager cache, then assert that only tasks with CRITICAL priority and non-DONE status are
+returned. Use AssertJ assertions."
+</blockquote>
+
+<p><strong>AI-generated output (accepted without modification):</strong></p>
+<pre>@Test
+void findByPriorityAndStatusNot_returnsCriticalNonDoneTasks() {
+    Project project = entityManager.persistAndFlush(new Project("Critical Project", null));
+
+    entityManager.persistAndFlush(new Task("Critical open", null, TaskStatus.OPEN,
+            TaskPriority.CRITICAL, null, project));
+    entityManager.persistAndFlush(new Task("Critical done", null, TaskStatus.DONE,
+            TaskPriority.CRITICAL, null, project));
+    entityManager.persistAndFlush(new Task("Medium open", null, TaskStatus.OPEN,
+            TaskPriority.MEDIUM, null, project));
+
+    entityManager.clear();
+
+    List&lt;Task&gt; criticalNonDone = taskRepository.findByPriorityAndStatusNot(
+            TaskPriority.CRITICAL, TaskStatus.DONE);
+
+    assertThat(criticalNonDone).hasSize(1);
+    assertThat(criticalNonDone.get(0).getTitle()).isEqualTo("Critical open");
+}</pre>
+
+<p><strong>Justification:</strong><br>
+The AI correctly used <code>persistAndFlush()</code> followed by <code>entityManager.clear()</code> – the proper
+<code>@DataJpaTest</code> pattern: flush to write to H2, then clear the first-level cache to force a real SQL
+SELECT. Without <code>clear()</code>, Hibernate returns cached objects rather than executing the query, potentially
+masking bugs. The test covers exactly one scenario, has a clean Arrange-Act-Assert structure, and uses typed
+AssertJ assertions.</p>
+
+<!-- ---- Example 2 ---- -->
+<h3>Example 2: AI Output Modified</h3>
+
+<p><strong>Original prompt:</strong></p>
+<blockquote>
+"Write a unit test for <code>TaskService.updateTaskStatus</code> that verifies the <code>completedAt</code>
+timestamp is set when a task is transitioned to DONE."
+</blockquote>
+
+<p><strong>Original AI-generated output:</strong></p>
+<pre>@Test
+void updateTaskStatus_toDone_setsCompletedAt() {
+    Task task = new Task();
+    task.setId(5L);
+    task.setStatus(TaskStatus.IN_PROGRESS);
+
+    when(taskRepository.findById(5L)).thenReturn(Optional.of(task));
+    when(taskRepository.save(task)).thenReturn(task);
+    when(taskMapper.toDTO(task)).thenReturn(new TaskDTO());
+
+    taskService.updateTaskStatus(5L, TaskStatus.DONE);
+
+    assertThat(task.getCompletedAt()).isNotNull();  // &lt;-- asserts on local variable
+}</pre>
+
+<p><strong>Problem with the original:</strong><br>
+The test asserted on the local <code>task</code> variable, relying on Java reference identity rather than
+verifying the entity passed to <code>save()</code>. If the service were refactored to copy the entity before
+saving, the assertion would pass on the original object even though the saved copy had a <code>null</code>
+<code>completedAt</code>. Additionally, the no-arg <code>new Task()</code> leaves the <code>project</code> field
+<code>null</code>, which would throw a <code>NullPointerException</code> when <code>TaskMapper.toDTO()</code>
+calls <code>task.getProject().getName()</code>.</p>
+
+<p><strong>Final modified version:</strong></p>
+<pre>@Test
+void updateTaskStatus_toDone_setsCompletedAtTimestamp() {
+    Project project = new Project("Gamma", "Gamma project");
+    project.setId(3L);
+
+    Task task = new Task("Fix bug", null, TaskStatus.IN_PROGRESS,
+            TaskPriority.HIGH, null, project);
+    task.setId(5L);
+
+    when(taskRepository.findById(5L)).thenReturn(Optional.of(task));
+    when(taskRepository.save(any(Task.class))).thenAnswer(inv -&gt; inv.getArgument(0));
+    when(taskMapper.toDTO(any(Task.class))).thenReturn(
+            new TaskDTO(5L, "Fix bug", null, TaskStatus.DONE, TaskPriority.HIGH,
+                        null, LocalDateTime.now(), 3L, "Gamma"));
+
+    taskService.updateTaskStatus(5L, TaskStatus.DONE);
+
+    ArgumentCaptor&lt;Task&gt; captor = ArgumentCaptor.forClass(Task.class);
+    verify(taskRepository).save(captor.capture());
+    assertThat(captor.getValue().getCompletedAt()).isNotNull();
+    assertThat(captor.getValue().getStatus()).isEqualTo(TaskStatus.DONE);
+}</pre>
+
+<p><strong>What changed and why:</strong></p>
+<ol>
+  <li><code>ArgumentCaptor</code> was introduced to capture the entity actually passed to <code>save()</code>, testing the correct contract: that the service sets <code>completedAt</code> before persisting.</li>
+  <li><code>any(Task.class)</code> replaces the specific reference match so the stub works if the service copies the entity.</li>
+  <li>A real <code>Project</code> was added to prevent the <code>NullPointerException</code> in the mapper.</li>
+</ol>
+
+<!-- ---- Example 3 ---- -->
+<h3>Example 3: AI Output Rejected</h3>
+
+<p><strong>Prompt:</strong></p>
+<blockquote>
+"Write a unit test for <code>ProjectService.deleteProject</code> that verifies the method throws
+<code>BusinessRuleException</code> when the project has in-progress tasks."
+</blockquote>
+
+<p><strong>Rejected AI-generated output (excerpt):</strong></p>
+<pre>@SpringBootTest
+@Transactional
+class ProjectServiceDeleteTest {
+
+    @Autowired
+    private ProjectService projectService;
+
+    @Autowired
+    private ProjectRepository projectRepository;
+
+    @Autowired
+    private TaskRepository taskRepository;
+
+    @Test
+    void deleteProject_withInProgressTasks_throwsException() {
+        Project project = new Project("Doomed Project", "desc");
+        projectRepository.save(project);
+
+        Task task = new Task("Active work", null, TaskStatus.IN_PROGRESS, ...);
+        taskRepository.save(task);
+
+        assertThrows(BusinessRuleException.class,
+                () -&gt; projectService.deleteProject(project.getId()));
+    }
+}</pre>
+
+<p><strong>Technical justification for rejection:</strong></p>
+<ol>
+  <li><strong>Wrong layer of the Test Pyramid.</strong> The test uses <code>@SpringBootTest</code>, which boots the entire application. The same business rule can be verified in under 1 ms using Mockito; this test takes over 5 seconds and carries JPA and HTTP startup overhead.</li>
+  <li><strong>Misuse of the Spring context for a unit concern.</strong> The business rule is entirely contained within <code>ProjectService.deleteProject()</code>. Testing it through the full context does not provide additional confidence – it only adds startup cost and coupling to infrastructure.</li>
+  <li><strong>Fragile implicit contract.</strong> The test relies on <code>@Autowired</code> repositories, H2 schema creation, and <code>@Transactional</code> rollback. If any of these change (e.g., the test profile is misconfigured), the test fails for reasons unrelated to the business rule.</li>
+</ol>
+
+<p>The correct unit test – already present in <code>ProjectServiceTest</code> – achieves the same result in &lt;1 ms with zero infrastructure:</p>
+<pre>@Test
+void deleteProject_whenHasInProgressTasks_throwsBusinessRuleException() {
+    when(projectRepository.existsById(10L)).thenReturn(true);
+    when(taskRepository.countByProjectIdAndStatus(10L, TaskStatus.IN_PROGRESS)).thenReturn(2L);
+
+    assertThatThrownBy(() -&gt; projectService.deleteProject(10L))
+            .isInstanceOf(BusinessRuleException.class)
+            .hasMessageContaining("in-progress");
+
+    verify(projectRepository, never()).deleteById(any());
+}</pre>
+
+<!-- ---- Example 4 ---- -->
+<h3>Example 4: AI-Identified Gap or Improvement</h3>
+
+<p><strong>Analysis prompt:</strong></p>
+<blockquote>
+"Review the unit test suite for <code>TaskService</code>. Identify any missing test scenarios or edge cases
+not currently covered."
+</blockquote>
+
+<p><strong>AI's suggestion:</strong></p>
+<blockquote>
+"The current suite does not test <code>deleteTask</code> when the task does not exist.
+<code>TaskService.deleteTask</code> calls <code>taskRepository.existsById(id)</code> and throws
+<code>ResourceNotFoundException</code> if it returns false. The only existing <code>deleteTask</code> test
+covers the happy path. A test for the not-found case would verify the guard clause and that
+<code>deleteById</code> is never called."
+</blockquote>
+
+<p><strong>Action taken – test added:</strong></p>
+<pre>@Test
+void deleteTask_whenTaskDoesNotExist_throwsResourceNotFoundException() {
+    when(taskRepository.existsById(404L)).thenReturn(false);
+
+    assertThatThrownBy(() -&gt; taskService.deleteTask(404L))
+            .isInstanceOf(ResourceNotFoundException.class)
+            .hasMessageContaining("404");
+
+    verify(taskRepository, never()).deleteById(any());
+}</pre>
+
+<p>The AI correctly identified that every guard clause deserves both a passing and a failing test.
+The suggestion was accepted and incorporated, bringing the unit test count for <code>TaskServiceTest</code>
+to 8 tests.</p>
+
+<!-- ---- Example 5 ---- -->
+<h3>Example 5: AI Output Constrained by Explicit Rules</h3>
+
+<p><strong>Prompt with explicit constraints:</strong></p>
+<blockquote>
+"Write a unit test for <code>TaskMapper.toDTO</code>. Apply the following constraints:
+<ol>
+  <li>Do NOT use <code>@ExtendWith(MockitoExtension.class)</code> or any Mockito annotations.</li>
+  <li>Do NOT start a Spring context (<code>@SpringBootTest</code>, <code>@DataJpaTest</code>, <code>@WebMvcTest</code>).</li>
+  <li>Instantiate <code>TaskMapper</code> with <code>new TaskMapper()</code> directly.</li>
+  <li>Use only JUnit 5 and AssertJ – no Spring test utilities.</li>
+</ol>
+The test should verify that all fields of the <code>Task</code> entity are correctly mapped to <code>TaskDTO</code>."
+</blockquote>
+
+<p><strong>AI-generated output produced under this constraint:</strong></p>
+<pre>class TaskMapperTest {
+
+    private final TaskMapper mapper = new TaskMapper();
+
+    @Test
+    void toDTO_mapsAllFieldsCorrectly() {
+        Project project = new Project("Mapper Project", "desc");
+        project.setId(5L);
+
+        Task task = new Task("Map me", "description here",
+                TaskStatus.IN_PROGRESS, TaskPriority.HIGH,
+                LocalDate.of(2026, 6, 1), project);
+        task.setId(99L);
+        task.setCompletedAt(LocalDateTime.of(2026, 5, 20, 10, 0));
+
+        TaskDTO dto = mapper.toDTO(task);
+
+        assertThat(dto.getId()).isEqualTo(99L);
+        assertThat(dto.getTitle()).isEqualTo("Map me");
+        assertThat(dto.getDescription()).isEqualTo("description here");
+        assertThat(dto.getStatus()).isEqualTo(TaskStatus.IN_PROGRESS);
+        assertThat(dto.getPriority()).isEqualTo(TaskPriority.HIGH);
+        assertThat(dto.getDueDate()).isEqualTo(LocalDate.of(2026, 6, 1));
+        assertThat(dto.getCompletedAt()).isEqualTo(LocalDateTime.of(2026, 5, 20, 10, 0));
+        assertThat(dto.getProjectId()).isEqualTo(5L);
+        assertThat(dto.getProjectName()).isEqualTo("Mapper Project");
+    }
+}</pre>
+
+<p><strong>Explanation:</strong></p>
+<p><strong>Behaviour being prevented:</strong> Without the constraint, AI tools default to adding
+<code>@ExtendWith(MockitoExtension.class)</code> or <code>@SpringBootTest</code> even for the simplest test
+classes. For <code>TaskMapper</code> – which has no dependencies and performs only field copies – this creates
+unnecessary overhead.</p>
+
+<p><strong>Why the constraint was necessary:</strong> <code>TaskMapper</code> is stateless and dependency-free.
+Testing it should cost nothing more than instantiating it and calling a method. Mockito's extension performs
+bytecode manipulation; Spring's context performs component scanning, JPA schema creation, and bean wiring.
+None of this is needed here.</p>
+
+<p><strong>How the constraint improved test quality:</strong> The resulting test runs in under 1 millisecond
+with zero framework overhead. It tests exactly the public contract of the class (field mapping) and nothing else.
+It cannot be broken by database configuration, Spring Boot version changes, or profile settings – a textbook
+example of a correctly placed test at the very base of the Test Pyramid.</p>
+
+<hr>
+
+<!-- ============================================================ -->
+<h2>Section 5 – Evaluation and Reflection</h2>
+
+<h3>Strengths of AI-Generated Tests</h3>
+
+<p><strong>Strength 1: Boilerplate generation speed.</strong><br>
+AI generated the structural boilerplate of test classes – imports, class-level annotations, mock field
+declarations, and <code>@BeforeEach</code> setup – in seconds. For <code>TaskRepositoryIntegrationTest</code>,
+the AI correctly identified <code>@DataJpaTest</code>, <code>@ActiveProfiles("test")</code>,
+<code>TestEntityManager</code>, and the <code>persistAndFlush/clear</code> pattern without being prompted.
+Writing this setup manually is error-prone; the AI produced it correctly on the first attempt.</p>
+
+<p><strong>Strength 2: Comprehensive boundary condition identification.</strong><br>
+When asked to review the test suite (Example 4), the AI correctly identified the missing
+<code>deleteTask</code> not-found test. It systematically recognised that every guard clause requires
+both a passing and a failing test – the kind of thorough enumeration humans focusing on the happy path
+sometimes miss.</p>
+
+<h3>Weaknesses of AI-Generated Tests</h3>
+
+<p><strong>Weakness 1: Default to heavy test infrastructure.</strong><br>
+Example 3 demonstrates the most consistent AI failure: reaching for <code>@SpringBootTest</code> regardless
+of whether the scenario requires it. The AI generated a full-context integration test for a scenario needing
+only two mock objects. Left unconstrained, AI will load thousands of lines of Spring infrastructure for a
+test that should run in milliseconds.</p>
+
+<p><strong>Weakness 2: Testing implementation details rather than contracts.</strong><br>
+In Example 2, the original AI-generated test asserted on the local <code>task</code> variable rather than
+using <code>ArgumentCaptor</code> to inspect the entity passed to <code>save()</code>. The test passed for
+the wrong reason: it verified Java reference semantics, not that the service sets <code>completedAt</code>
+before persisting. A test that passes for the wrong reason can survive a refactoring that breaks the actual
+contract.</p>
+
+<h3>Observed AI Failure Mode: Incorrect Assumption About Test Scope</h3>
+
+<p>Across multiple interactions, AI tools consistently pattern-match "Spring Boot application" → "use
+<code>@SpringBootTest</code>" without reasoning about whether the specific test requires the full context.
+The practical consequence is test suites that are slow, brittle, and fragile under configuration changes –
+for reasons entirely unrelated to the business logic under test. This is not occasional; it is the default
+behaviour unless explicitly constrained (as demonstrated in Example 5).</p>
+
+<h3>Example Where Human Judgement Improved Test Quality</h3>
+
+<p>In Example 2, the AI's assertion on the mutated local variable appeared correct at first glance.
+It was human review of the <em>reason</em> for the assertion – not just the assertion itself – that
+identified the problem. The human question was: "Is this test actually verifying that the entity passed to
+<code>save()</code> has <code>completedAt</code> set, or is it just verifying that the service mutates
+the same object it received?" AI does not naturally ask this kind of reflective question about its own output;
+it generates locally plausible code without considering whether the assertion survives reasonable refactoring.
+The fix – introducing <code>ArgumentCaptor</code> – came from applying the testing principle that assertions
+should verify observable outputs through public interfaces, not through internal object state.</p>
+
+<h3>One Improvement to the AI-Assisted Testing Approach</h3>
+
+<p>The most valuable single improvement would be to establish a <strong>constraint prompt template</strong>
+prepended to every test-generation request. Based on patterns observed in this assignment, the template
+would include:</p>
+
+<pre>Rules for all tests in this project:
+1. If the class under test has no Spring dependencies, use @ExtendWith(MockitoExtension.class) only.
+2. Never use @SpringBootTest for a test that can be written with @WebMvcTest, @DataJpaTest,
+   or plain Mockito.
+3. When asserting on side-effects (calls to save(), delete()), use ArgumentCaptor to verify
+   the exact argument passed, not the local variable.
+4. Every method with a guard clause requires at least two tests: one where the guard passes,
+   one where it throws.</pre>
+
+<p>Rather than correcting AI output after the fact, this approach constrains it at the source – eliminating
+the most frequently observed failure modes before any code is generated.</p>
+
+</body>
+</html>
